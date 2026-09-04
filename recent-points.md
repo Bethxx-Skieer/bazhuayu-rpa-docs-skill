@@ -96,3 +96,29 @@ Mintlify Dashboard 显示某次 Deployment failed，未必是你这边的问题�
 源站 `.jpg` 常被存成 `.png` 文件名但内容仍是 JPEG（magic bytes `FF D8 FF`），浏览器按 PNG 解码破图。
 - 批量扫描 `commands/**/images/*.png` + `guides/**/images/*.png`：读前 8 字节，`b[:3]==b'\xff\xd8\xff'` 即 JPEG 误标。
 - 修复（venv PIL）：`Image.open(p).save(p, format="PNG")` 原地转真 PNG（文件名不变，线上 URL 不变）。
+
+## L. docs.json redirects 注入（解决客户端旧链接迁移）
+
+**场景**：客户端每条指令链接到 `https://rpa.bazhuayu.com/helpcenter/docs/{slug}`，开发者只能把 `/docs/*` 服务端统一 302 到 `/commands/*`，但新文档站实际是 `/commands/{分类}/{slug}`（多一层分类），跳转后会 404。
+
+**方案**：用 Mintlify docs.json 顶层 `redirects` 字段，把每个具体指令页加一条：
+```json
+{ "source": "/commands/{slug}", "destination": "/commands/{category}/{slug}" }
+```
+Mintlify 自动 308 跳转，无需后端配合。
+
+**实施**：
+1. 扫描 `commands/{category}/*.mdx` 列出所有具体指令 slug（跳过 `commands/{category}.mdx` 总览）。
+2. Python 合并入 docs.json（dict 去重 + 校验 destination 全部在 navigation 里存在）。
+3. 全链路：`/docs/{slug}` → 服务端 → `/commands/{slug}` → docs.json 308 → `/commands/{category}/{slug}`（200）。
+
+**2026-09-04 实战**：`bazhuayu-rpa-docs` 21 个分类、330 条 redirect 注入 docs.json，commit `2d989b5`，每分类抽样 1 个共 20 个验证全部 308 OK。
+
+## M. 线上核验必须先看 sitemap.xml 确认真实 host
+
+**坑**：本仓库的预览域名 `bazhuayu-rpa-docs.mintlify.app` 与生产域名 `rpa.bazhuayu.com/helpcenter/` 内容一致但路由缓存时序不同——同一次部署后，预览域可能首页 200 + 具体页 404，但生产域是正常的；反之亦然。
+
+**对策**：
+- 核验任何 URL 前先请求 `https://<base>/sitemap.xml`，正则提取所有 `<loc>` 标签，**第一个出现的 host** 就是生产域（或当前 CDN 实际命中的 host）。
+- 再用那个 host 做所有 200 / 404 / 跳转核验。
+- 不要预设 `.mintlify.app` 就是生产域。
