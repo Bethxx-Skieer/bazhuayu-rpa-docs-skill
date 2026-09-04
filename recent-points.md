@@ -122,3 +122,25 @@ Mintlify 自动 308 跳转，无需后端配合。
 - 核验任何 URL 前先请求 `https://<base>/sitemap.xml`，正则提取所有 `<loc>` 标签，**第一个出现的 host** 就是生产域（或当前 CDN 实际命中的 host）。
 - 再用那个 host 做所有 200 / 404 / 跳转核验。
 - 不要预设 `.mintlify.app` 就是生产域。
+
+## N. 批量新增一个大分类（含占位页 + 导航 + 跳转）
+
+**场景（2026-09-04）**：用户要在「指令概述」tab 的 概述 之后新增大分类「自定义指令」，一次给几十条「指令名（slug）」，且这些指令原本也挂在旧 helpcenter `/docs/` 下，需要一并配跳转。
+
+**标准流程**（后续批次直接复用）：
+
+1. **先校验 slug 数据质量**（最容易踩坑，务必先做）：
+   - 有没有**缺 slug** 的条目 → 跳过并告知用户补。
+   - 有没有**重复 slug** → 按先到先得建第一条，其余跳过并告知。
+   - 断言 `len(slugs) == len(set(slugs))`，不要静默覆盖。
+2. **建目录 + 占位页**：`commands/{新分类}/{slug}.mdx`，内容沿用现有指令页骨架（指令说明 / 参数说明 Tabs / 使用示例 / Info），正文用 `<Warning> 内容正在完善中</Warning>` 标注，避免看起来像坏页。
+3. **建分类总览页**：`commands/{新分类}.mdx`，列出所有指令链接（`- [{name}](/commands/{新分类}/{slug})`）。
+4. **docs.json 导航**：在「指令概述」tab 的 `commands/index` 之后、`条件判断` 之前插入新分组：
+   ```json
+   { "group": "自定义指令", "pages": ["commands/{新分类}", "commands/{新分类}/{slug1}", ...] }
+   ```
+5. **重生成全量 redirects**（不要手工追加，容易漏/重复）：扫描 `commands/{分类}/*.mdx` 重建整个 `redirects` 数组。
+6. **校验 4 项**：JSON OK / 新页 `_mdxcheck.cjs` ALL_OK / 每个 redirect destination 都在 nav 里 / redirect source 不与真实页冲突。
+7. **提交 → 核验**：新页 200 + 抽样跳转 308 + 侧边栏出现新分类 + sitemap 收录。
+
+**2026-09-04 实战**：新增「自定义指令」分类，51 条数据中 2 条有问题（京东-咚咚工作站(web) 缺 slug；拼多多 slug 与扣子CozeAPI 重复），实际建 49 条；redirects 330 → 379；commit `6a32a10`；抽检 8 条跳转全 308 OK。
